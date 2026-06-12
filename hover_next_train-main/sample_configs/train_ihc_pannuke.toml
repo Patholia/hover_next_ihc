@@ -1,0 +1,98 @@
+# HoverNext-IHC — IHC PanNuke Eğitim Config
+# Dataset: UNIStainNet çıktısı (ER / PR / HER2 / Ki67)
+# Kullanım: torchrun --nproc_per_node=<GPU_SAYISI> train.py --config sample_configs/train_ihc_pannuke.toml
+
+# ── Veri ──────────────────────────────────────────────────────────────────
+dataset   = "ihc_pannuke"
+data_path = "/path/to/ihc_output"   # pannuke_to_ihc.py çıktı klasörü
+
+# Hangi markerlar kullanılacak (varsayılan: tümü)
+# markers = ["ER", "PR", "HER2", "Ki67"]
+
+# Split klasör adları (pannuke_to_ihc.py çıktısıyla eşleşmeli)
+train_split = "train"
+val_split   = "val"
+
+# ── Model ─────────────────────────────────────────────────────────────────
+encoder        = "convnextv2_tiny.fcmae_ft_in22k_in1k"
+out_channels_cls = 6      # IHC sınıf sayısı (orijinalle aynı)
+inst_channels    = 5      # instance kanallar (değişmez)
+pretrained       = true   # ImageNet pretrained encoder
+n_markers        = 4      # ER=0, PR=1, HER2=2, Ki67=3
+
+# ── Eğitim ────────────────────────────────────────────────────────────────
+batch_size            = 24
+validation_batch_size = 64
+weight_decay          = 0.0001
+learning_rate         = 0.0001
+min_learning_rate     = 1e-7
+training_steps        = 200000
+validation_step       = 1000
+checkpoint_step       = 10000
+warmup_steps          = 10000
+fl_gamma              = 2
+loss_lambda           = 0.1
+label_smoothing       = 0.1
+use_weighted_sampling = true   # IHC'de pozitif hücre az olabilir — önemli
+use_ema_loss          = false
+
+# ── Değerlendirme ─────────────────────────────────────────────────────────
+tta              = 16
+eval_optim_metric = "pannuke"
+n_rounds         = 5
+save             = false
+f1_metric_ccrop  = 256
+match_euc_dist   = 12
+eval_criteria    = "pannuke"
+
+# ── Post-processing ───────────────────────────────────────────────────────
+max_hole_size = 128
+
+# ── Deney ─────────────────────────────────────────────────────────────────
+checkpoint_path = ""
+experiment      = "ihc_pannuke_convnextv2_tiny"
+seed            = 42
+fold            = 1
+test_as_val     = false
+optim_metric    = "pannuke"
+
+# ── Ortam ─────────────────────────────────────────────────────────────────
+num_workers = 4
+use_amp     = true
+
+# ── IHC Renk Augmentation ─────────────────────────────────────────────────
+# H&E'ye göre düşürülmüş değerler: saturation=0, hue=0.03
+color_scale = 0.15   # H&E için 0.4'tü, IHC için düşürüldü
+
+# ── Spatial Augmentation ──────────────────────────────────────────────────
+[aug_params_fast.mirror]
+prob_x = 0.5
+prob_y = 0.5
+prob   = 0.5
+
+[aug_params_fast.translate]
+max_percent = 0.05
+prob        = 0.2
+
+[aug_params_fast.scale]
+min  = 0.8
+max  = 1.2
+prob = 0.2
+
+[aug_params_fast.zoom]
+min  = 0.5
+max  = 1.5
+prob = 0.2
+
+[aug_params_fast.rotate]
+max_degree = 179
+prob       = 0.75
+
+[aug_params_fast.shear]
+max_percent = 0.1
+prob        = 0.2
+
+[aug_params_fast.elastic]
+alpha = [120, 120]
+sigma = 8
+prob  = 0.5

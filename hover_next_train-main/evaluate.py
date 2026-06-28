@@ -163,6 +163,10 @@ def process_and_save(res, out_p, dsname, tta, class_names=CLASS_NAMES):
         os.path.join(out_p, f"{dsname}_std_metrics_tta_{tta}_n_{nrounds}.json"), "w"
     ) as f:
         json.dump(std_dict, f)
+    # DÜZELTME: mean_dict döndürülmüyordu — tüm checkpoint'leri tarayıp
+    # hangisinin gerçekten en iyi olduğunu bulmak için (--all_checkpoints)
+    # her checkpoint'in skoru runtime'da okunabilmeli.
+    return mean_dict
 
 
 def evaluate_tile_dataset(
@@ -175,6 +179,7 @@ def evaluate_tile_dataset(
     class_names=CLASS_NAMES,
     rank=0,
     types=None,
+    out_suffix=None,
 ):
     color_aug_fn = color_augmentations(False, s=0.2, rank=rank)
     aug = SpatialAugmenter(aug_params_slow)
@@ -257,10 +262,15 @@ def evaluate_tile_dataset(
                 np.stack(pred_list),
             )
         res.append([mpq_list, r2_list, mdict, pq, pan_bpq, pan_pq_list, pan_tiss])
-    process_and_save(res, out_p, dsname, tta=params["tta"], class_names=class_names)
+    # DÜZELTME: --all_checkpoints ile birden çok checkpoint art arda
+    # değerlendirildiğinde, sonuç dosyaları aynı isimle üst üste yazılıp
+    # birbirini eziyordu. out_suffix verildiğinde (checkpoint adı), dosya
+    # adına eklenir.
+    save_name = f"{dsname}_{out_suffix}" if out_suffix else dsname
+    return process_and_save(res, out_p, save_name, tta=params["tta"], class_names=class_names)
 
 
-def main(nclasses, class_names, cp_paths, params, rank=0):
+def main(nclasses, class_names, cp_paths, params, rank=0, all_checkpoints=False, checkpoint_name="best_model"):
     print("main")
     # load data and create slice_dataset
     ds_list = []
@@ -337,10 +347,92 @@ def main(nclasses, class_names, cp_paths, params, rank=0):
         ds_list.extend([mit_test_ds])
         ds_names.extend(["mitosis_test"])
 
-    # load models
+    # DÜZELTME: önceden sadece "best_model" yükleniyordu — ama best_model,
+    # training sırasında ONLINE validation metriğine göre (farklı fg/seed
+    # eşikleriyle hesaplanan bir mPQ'ya göre) seçiliyor; bu, asıl test-seti
+    # değerlendirmesindeki gerçek en iyi checkpoint ile birebir aynı olmak
+    # zorunda değil. --all_checkpoints verilirse, deney klasöründeki TÜM
+    # checkpoint_step_* dosyaları (+ best_model + last_model varsa) tek tek
+    # yüklenip değerlendirilir ve gerçek skorlarına göre sıralanır.
+    if all_checkpoints:
+        train_dir = f"{cp_paths[0]}/train"
+        ckpt_files = [f for f in os.listdir(train_dir) if f.startswith("checkpoint_step_")]
+        ckpt_files = sorted(ckpt_files, key=lambda f: int(f.split("checkpoint_step_")[-1]))
+        for extra in ("last_model", "best_model"):
+            if os.path.exists(os.path.join(train_dir, extra)):
+                ckpt_files.append(extra)
+        print(f"🔍 {len(ckpt_files)} checkpoint bulundu: {ckpt_files}")
+
+        ranking = []
+        for ckpt_name in ckpt_files:
+            print(f"\n{'='*60}\n📦 Değerlendiriliyor: {ckpt_name}\n{'='*60}")
+            models = []
+            step_loaded = None
+            for pth in cp_paths:
+                checkpoint_path = f"{pth}/train/{ckpt_name}"
+                model = get_model(
+                    enc=params["encoder"],
+                    out_channels_cls=nclasses + 1,
+                    out_channels_inst=5,
+                    n_markers=params.get("n_markers", 4),
+                ).to(rank)
+                model, step_loaded, _ = load_checkpoint(model, checkpoint_path, 0)
+                model.eval()
+                models.append(model)
+            for ds, dsname in zip(ds_list, ds_names):
+                if ds is None:
+                    continue
+                mean_dict = evaluate_tile_dataset(
+                    ds,
+                    models,
+                    dsname,
+                    cp_paths,
+                    params,
+                    nclasses,
+                    class_names,
+                    rank,
+                    types=types_fold,
+                    out_suffix=ckpt_name,
+                )
+                pan = mean_dict.get("pannuke_metrics", {}) if mean_dict else {}
+                ranking.append(
+                    {
+                        "checkpoint": ckpt_name,
+                        "step": step_loaded,
+                        "dataset": dsname,
+                        "bpq": pan.get("bpq"),
+                        "mpq": pan.get("mpq"),
+                    }
+                )
+            del models
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        ranking_sorted = sorted(
+            ranking,
+            key=lambda r: r["bpq"] if r["bpq"] is not None else -1,
+            reverse=True,
+        )
+        print("\n" + "=" * 60)
+        print("🏆 SIRALAMA (bpq'ya göre, büyükten küçüğe)")
+        print("=" * 60)
+        for r in ranking_sorted:
+            bpq_str = f"{r['bpq']:.4f}" if r["bpq"] is not None else "N/A"
+            print(f"  step {str(r['step']):>8}  |  {r['checkpoint']:<22}  |  bpq={bpq_str}")
+
+        out_p = os.path.join(params["experiment"], params["eval_optim_metric"])
+        os.makedirs(out_p, exist_ok=True)
+        with open(os.path.join(out_p, "checkpoint_ranking.json"), "w") as f:
+            json.dump(ranking_sorted, f, indent=2)
+        if ranking_sorted:
+            best = ranking_sorted[0]
+            print(f"\n✅ Gerçek en iyi checkpoint: {best['checkpoint']} (step {best['step']}, bpq={best['bpq']})")
+        return ranking_sorted
+
+    # ── tek checkpoint (eski davranış, varsayılan: best_model) ────────────
     models = []
     for pth in cp_paths:
-        checkpoint_path = f"{pth}/train/best_model"
+        checkpoint_path = f"{pth}/train/{checkpoint_name}"
         print(checkpoint_path)
         enc = params["encoder"]
         model = get_model(
@@ -404,6 +496,20 @@ if __name__ == "__main__":
         "otomatik bulunur. Notebook'larda '--exp' yerine '--config' kullanmak "
         "isteyenler için eklendi.",
     )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default="best_model",
+        help="Değerlendirilecek tek checkpoint dosyası (örn. best_model, "
+        "checkpoint_step_40000). --all_checkpoints verilirse yok sayılır.",
+    )
+    parser.add_argument(
+        "--all_checkpoints",
+        action="store_true",
+        help="DÜZELTME (yeni): best_model'e güvenmek yerine, deney klasöründeki "
+        "TÜM checkpoint_step_* (+ best_model + last_model) dosyalarını tek tek "
+        "test setinde değerlendirir ve gerçek skora göre sıralar.",
+    )
 
     args = parser.parse_args()
     if args.config:
@@ -428,4 +534,12 @@ if __name__ == "__main__":
         class_names = CLASS_NAMES
         nclasses = 7
     rank = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    main(nclasses, class_names, args.exp.split(","), params, rank)
+    main(
+        nclasses,
+        class_names,
+        args.exp.split(","),
+        params,
+        rank,
+        all_checkpoints=args.all_checkpoints,
+        checkpoint_name=args.checkpoint,
+    )

@@ -108,7 +108,12 @@ def process_and_save(res, out_p, dsname, tta, class_names=CLASS_NAMES):
             "bpq": pannuke_bpq_std,
             "mpq": pannuke_mpq_std.tolist(),
         }
-    if res[0][6] is not None:
+    # DÜZELTME: IHC verisinde "tissue type" (organ) etiketi olmadığı için
+    # pannuke_eval() -> get_pannuke_pq() bu durumda [None, None] döndürüyor.
+    # Bu liste `is not None` testini geçtiği için (kendisi None değil, içeriği
+    # None) eski kod None.values() çağırıp AttributeError ile çöküyordu.
+    # Artık içindeki ilk elemanın da None olmadığını kontrol ediyoruz.
+    if res[0][6] is not None and res[0][6][0] is not None:
         tiss_mpq = []
         tiss_bpq = []
         for r in res:

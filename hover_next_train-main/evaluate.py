@@ -189,9 +189,27 @@ def evaluate_tile_dataset(
     out_p = os.path.join(params["experiment"], params["eval_optim_metric"])
     if not os.path.exists(out_p):
         os.makedirs(out_p)
-    best_fg_thresh_cl, best_seed_thresh_cl = get_pp_params(
-        experiments, "", True, eval_metric=params["eval_optim_metric"]
-    )
+    # DÜZELTME: burada eskiden mit_eval=True SABİT verilmişti — bu da
+    # get_pp_params'ın her zaman Lizard/Mitosis'e özel "liz_test_param_dict.json"
+    # ve "mit_test_param_dict.json" dosyalarını aramasına yol açıyordu. Bu
+    # dosyalar IHC/PanNuke deneylerinde hiçbir zaman üretilmiyor (hp_search.py
+    # "ihc_pannuke" dataset tipini tanımıyor), dolayısıyla evaluate.py IHC
+    # checkpoint'leri için FileNotFoundError ile çöküyordu.
+    # IHC/PanNuke için, eşik araması (hp_search.py) gerektirmeyen, eğitim
+    # sırasında validation.py'nin de kullandığı sabit fg/seed eşikleriyle
+    # (0.7 / 0.3) devam ediyoruz — böylece bu sonuçlar training-time mPQ ile
+    # karşılaştırılabilir kalıyor.
+    if params["dataset"] in ("ihc_pannuke", "pannuke"):
+        best_fg_thresh_cl = [0.7] * nclasses
+        best_seed_thresh_cl = [0.3] * nclasses
+        print(
+            f"ℹ️  {params['dataset']} için sabit eşikler kullanılıyor "
+            f"(fg=0.7, seed=0.3) — hp_search gerekmiyor"
+        )
+    else:
+        best_fg_thresh_cl, best_seed_thresh_cl = get_pp_params(
+            experiments, "", True, eval_metric=params["eval_optim_metric"]
+        )
 
     res = []
 

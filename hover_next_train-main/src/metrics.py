@@ -278,7 +278,7 @@ def get_pq(true, pred, match_iou=0.5, remap=True):
     try:
         dq = tp / (tp + 0.5 * fp + 0.5 * fn)
     except ZeroDivisionError:
-        dq = np.NaN
+        dq = np.nan
     # get the SQ, no paired has 0 iou so not impact
     sq = paired_iou.sum() / (tp + 1.0e-6)
 
@@ -421,7 +421,7 @@ def f1_custom(gt, pred):
     try:
         f1 = (2 * tp) / ((2 * tp) + fp + fn + 1e-6)
     except ZeroDivisionError:
-        f1 = np.NaN
+        f1 = np.nan
     return f1
 
 
@@ -435,7 +435,7 @@ def mcc_custom(gt, pred):
             (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)
         )
     except ZeroDivisionError:
-        mcc = np.NaN
+        mcc = np.nan
     return mcc
 
 
@@ -546,8 +546,8 @@ def per_tile_worker(cnt, gt_tile, pred_tile, match_euc_dist, class_names):
         f1_d = (2 * tp) / ((2 * tp) + (2 * fp) + (2 * fn))
     except ZeroDivisionError:
         # this means neither on GT nor pred there is a nucleus
-        f1 = np.NaN
-        f1_d = np.NaN
+        f1 = np.nan
+        f1_d = np.nan
         return [
             {
                 "id": cnt,
@@ -612,9 +612,9 @@ def per_tile_worker(cnt, gt_tile, pred_tile, match_euc_dist, class_names):
 
     sub_metrics = []
     for cls in np.arange(1, len(class_names) + 1):
-        tp_hd = np.NaN
-        tp_dice = np.NaN
-        tp_mcc = np.NaN
+        tp_hd = np.nan
+        tp_dice = np.nan
+        tp_mcc = np.nan
         try:
             t = class_pairs[:, 0] == cls
             p = class_pairs[:, 1] == cls
@@ -641,24 +641,24 @@ def per_tile_worker(cnt, gt_tile, pred_tile, match_euc_dist, class_names):
             f1_c = (2 * tp_c) / ((2 * tp_c) + fp_c + fn_c)
             f1_c_d = (2 * tp_c) / ((2 * tp_c) + (2 * fp_c) + (2 * fn_c))
         except ZeroDivisionError:
-            f1_c = np.NaN
-            f1_c_d = np.NaN
+            f1_c = np.nan
+            f1_c_d = np.nan
         # balanced accurracy needs special treatment
         try:
             tpr_c = tp_c / (tp_c + fn_c)
         except ZeroDivisionError:
-            tpr_c = np.NaN
+            tpr_c = np.nan
         try:
             tnr_c = tn_c / (tn_c + fp_c)
         except ZeroDivisionError:
-            tnr_c = np.NaN
+            tnr_c = np.nan
         bal_acc_c = (tpr_c + tnr_c) / 2
         try:
             mcc_c = ((tp_c * tn_c) - (fp_c * fn_c)) / math.sqrt(
                 (tp_c + fp_c) * (tp_c + fn_c) * (tn_c + fp_c) * (tn_c + fn_c)
             )
         except ZeroDivisionError:
-            mcc_c = np.NaN
+            mcc_c = np.nan
 
         sub_metrics.append(
             {
